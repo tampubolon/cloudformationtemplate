@@ -1,0 +1,363 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters": {
+        "WebServerKeyName": {
+            "Description": "The key pair to establish a SSH connection to the web servers.",
+            "Type": "AWS::EC2::KeyPair::KeyName"
+        },
+        "VPC": {
+            "Type": "AWS::EC2::VPC::Id",
+            "Description": "VpcId of your existing Virtual Private Cloud (VPC)",
+            "ConstraintDescription": "must be the VPC Id of an existing Virtual Private Cloud."
+        }
+    },
+    "Resources": {
+		"LT": {
+            "Type": "AWS::EC2::LaunchTemplate",
+            "Properties": {
+                "LaunchTemplateName": "MartinProjc-IIS-11Feb",
+                "LaunchTemplateData": {
+                    "BlockDeviceMappings": [
+                        {
+                            "Ebs": {
+                                "VolumeSize": 8
+                            },
+                            "DeviceName": "/dev/sdf"
+                        }
+                    ],
+                    "CreditSpecification": {
+                        "CpuCredits": "unlimited"
+                    },
+                    "ImageId": "ami-xxxxxxxxxxxxxxx",
+                    "KeyName": {
+                        "Ref": "WebServerKeyName"
+                    },
+                    "InstanceType": "t2.micro",
+                    "Monitoring": {
+                        "Enabled": false
+                    },
+                    "SecurityGroupIds": [
+                        "sg-xxxxxxxxxxxxxxx"
+                    ],
+                    "UserData": {
+                        "Fn::Base64": {
+                            "Fn::Join": [
+                                "",
+                                [
+									"<powershell>\n",
+									"Start-Transcript;\n",
+									"# Install IIS\n",
+									"Import-Module ServerManager;\n",
+									"Enable-WindowsOptionalFeature -Online -NoRestart -FeatureName 'IIS-WebServerRole', 'IIS-WebServer', 'IIS-ManagementConsole';\n",
+									"</powershell>\n"
+                                ]
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "LT2": {
+            "Type": "AWS::EC2::LaunchTemplate",
+            "Properties": {
+                "LaunchTemplateName": "MartinProjc-Nginx-11Feb",
+                "LaunchTemplateData": {
+                    "BlockDeviceMappings": [
+                        {
+                            "Ebs": {
+                                "VolumeSize": 8
+                            },
+                            "DeviceName": "/dev/sdf"
+                        }
+                    ],
+                    "CreditSpecification": {
+                        "CpuCredits": "unlimited"
+                    },
+                    "ImageId": "ami-xxxxxxxxxxxxxxx",
+                    "KeyName": {
+                        "Ref": "WebServerKeyName"
+                    },
+                    "InstanceType": "t2.micro",
+                    "Monitoring": {
+                        "Enabled": false
+                    },
+                    "SecurityGroupIds": [
+                        "sg-xxxxxxxxxxxxxxx"
+                    ],
+                    "UserData": {
+                        "Fn::Base64": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    "#!/bin/bash\n",
+                                    "# Install Nginx\n",
+                                    "sudo amazon-linux-extras install nginx1.12\n",
+                                    "#Start nginx service\n",
+                                    "sudo service nginx start\n",
+									"sudo mkdir /usr/share/nginx/html/web2\n",
+									"cd /usr/share/nginx/html\n",
+									"sudo cp index.html web2"
+                                ]
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+		"IISASG": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+                "AvailabilityZones": [
+                    "ap-southeast-1a",
+                    "ap-southeast-1b"
+                ],
+                "LaunchTemplate": {
+                    "LaunchTemplateName": "MartinProjc-IIS-11Feb", 
+                    "Version": 1
+                },
+                "MinSize": "1",
+                "MaxSize": "2",
+                "VPCZoneIdentifier": [
+                    "subnet-xxxxxxxxxxxxxxx",
+                    "subnet-xxxxxxxxxxxxxxx"
+                ],
+                "TargetGroupARNs": [
+                    {
+                        "Fn::Sub": [
+                            "arn:aws:elasticloadbalancing:${Tempat}:${AkunId}:${TgFullName}",
+                            {
+                                "Tempat": {
+                                    "Ref": "AWS::Region"
+                                },
+                                "AkunId": {
+                                    "Ref": "AWS::AccountId"
+                                },
+                                "TgFullName": {
+                                    "Fn::GetAtt": [
+                                        "TargetGroup",
+                                        "TargetGroupFullName"
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "NginxASG": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+                "AvailabilityZones": [
+                    "AZ1",
+                    "AZ2"
+                ],
+                "LaunchTemplate": {
+                    "LaunchTemplateName": "MartinProjc-Nginx-11Feb",
+                    "Version": 1
+                },
+                "MinSize": "1",
+                "MaxSize": "2",
+                "VPCZoneIdentifier": [
+                    "subnet-07b529650559a8d43",
+                    "subnet-0f6a83bf6fe9cfc50"
+                ],
+                "TargetGroupARNs": [
+                    {
+                        "Fn::Sub": [
+                            "arn:aws:elasticloadbalancing:${Tempat}:${AkunId}:${TgFullName}",
+                            {
+                                "Tempat": {
+                                    "Ref": "AWS::Region"
+                                },
+                                "AkunId": {
+                                    "Ref": "AWS::AccountId"
+                                },
+                                "TgFullName": {
+                                    "Fn::GetAtt": [
+                                        "TargetGroup2",
+                                        "TargetGroupFullName"
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "JumpHostSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "martin-projc-bastion",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "JumpHostSG"
+                    }
+                ],
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "FromPort": 3389,
+                        "IpProtocol": "tcp",
+                        "ToPort": 3389
+                    }
+                ]
+            }
+        },
+		"LoadBalancerSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "LB-Security-Group",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "LoadBalancerSG"
+                    }
+                ],
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "FromPort": 80,
+                        "IpProtocol": "tcp",
+                        "ToPort": 80
+                    },
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "FromPort": 443,
+                        "IpProtocol": "tcp",
+                        "ToPort": 443
+                    }
+                ]
+            }
+        },
+        "BastionInstance": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "InstanceType": "t2.micro",
+                "ImageId": "ami-xxxxxxxxxxxxxxx",
+                "KeyName": {
+                    "Ref": "WebServerKeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "JumpHostSecurityGroup"
+                            }
+                        ],
+                        "AssociatePublicIpAddress": "true",
+                        "DeviceIndex": "0",
+                        "DeleteOnTermination": "true",
+                        "SubnetId": "subnet-xxxxxxxxxxxxxxx"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Value": "Jump-Host-MartinProjc-CF",
+                        "Key": "Name"
+                    }
+                ]
+            }
+        },
+        "TargetGroup": {
+            "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+            "Properties": {
+                "Name": "MartinProjc-TG-CF",
+                "Port": "80",
+                "Protocol": "HTTP",
+                "UnhealthyThresholdCount": "2",
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+		},
+		"TargetGroup2": {
+            "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+            "Properties": {
+                "Name": "MartinProjc-TG-CF2",
+                "Port": "80",
+                "Protocol": "HTTP",
+                "UnhealthyThresholdCount": "2",
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "LoadBalancer": {
+            "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+            "Properties": {
+                "Subnets": [
+                    "subnet-xxxxxxxxxxxxxxx",
+					"subnet-xxxxxxxxxxxxxxx"
+                ],
+                "Name": "martin-projc-LB",
+                "Type": "application",
+                "Scheme": "internet-facing",
+                "SecurityGroups": [
+                    {
+                        "Ref": "LoadBalancerSecurityGroup"
+                    }
+                ],
+                "IpAddressType": "ipv4"    
+            }
+        },
+        "Listener": {
+            "Type": "AWS::ElasticLoadBalancingV2::Listener",
+            "Properties": {
+                "DefaultActions": [
+                    {
+                        "Type": "forward",
+                        "TargetGroupArn": {
+                            "Ref": "TargetGroup"
+                        }
+                    }
+                ],
+                "LoadBalancerArn": {
+                    "Ref": "LoadBalancer"
+                },
+                "Port": "80",
+                "Protocol": "HTTP"
+            }
+        },
+		"ListenerRule": {
+			"Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+			"Properties": {
+				"Actions": [{
+					"Type": "forward",
+					"TargetGroupArn": { "Ref": "TargetGroup2" }
+				}],
+				"Conditions": [{
+					"Field": "path-pattern",
+					"PathPatternConfig": {
+						"Values": ["/web2*"]
+					}
+				}],
+			"ListenerArn": { "Ref": "Listener" },
+			"Priority": 2
+			}
+		}	
+	}	
+}
+
+
+//=====================comment=======================
+MartinProjc selesai tgl 11 Feb 20
+
+
+
+
+
+
+
+
+
+
+
+
+
